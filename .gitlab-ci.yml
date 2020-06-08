@@ -1,0 +1,113 @@
+image: docker:latest
+services:
+  - docker:dind
+  
+variables:
+  # DOCKERFILE
+  DOCKERFILE: 'Dockerfile'
+
+  HARBOR_PROJECT_URL: 'harbor.zeedlogic.com/jodykpw/'
+  REPOSITORY: 'universal-nginx-php73'
+
+  TAG: "1.0.0"
+  DEV_TAG: $TAG.DEV$CI_JOB_ID
+
+# MASTER
+.master_ci_job: &master_ci_job
+   only:
+     - master
+   environment:
+     name: master 
+   tags:
+     - docker-01.zeedlogic.shared.docker
+
+.master_ci_manual_job: &master_ci_manual_job
+  when: manual
+  <<: *master_ci_job
+  
+# PRODUCTION
+.prd_ci_job: &prd_ci_job
+   only:
+     - production
+   environment:
+     name: production 
+   tags:
+     - docker-01.zeedlogic.shared.ssh
+
+.prd_ci_manual_job: &prd_ci_manual_job
+  when: manual
+  <<: *prd_ci_job
+
+# UAT
+.uat_ci_job: &uat_ci_job
+   only:
+     - uat
+   environment:
+     name: uat 
+   tags:
+     - docker-01.zeedlogic.shared.ssh
+
+.uat_ci_manual_job: &uat_ci_manual_job
+  when: manual
+  <<: *uat_ci_job
+
+# DEVELOPMENT
+.dev_ci_job: &dev_ci_job
+   only:
+     - dev
+   environment:
+     name: dev 
+   tags:
+     - docker-01.zeedlogic.shared.docker
+
+.dev_ci_manual_job: &dev_ci_manual_job
+  when: manual
+  <<: *dev_ci_job
+
+stages:
+  - build
+  - test
+  - validate
+  - release
+
+before_script:
+  - docker login -u $HARBOR_USER -p $HARBOR_PASSWORD harbor.zeedlogic.com
+
+build_dev_image:
+  stage: build
+  script:
+    - echo Build started on `date` for $DEV_TAG
+    - docker build --pull -t $HARBOR_PROJECT_URL$REPOSITORY:$DEV_TAG -f $DOCKERFILE .
+    - docker push $HARBOR_PROJECT_URL$REPOSITORY:$DEV_TAG
+  <<: *dev_ci_manual_job  
+
+docker-compose-up_uat:
+  stage: test
+  script:
+    - echo UAT on `date` for $DEV_TAG
+    - echo "$SUDO" | sudo -S HOST=$HOST IMAGE=$IMAGE docker-compose -f docker-compose-traefik.yml up -d
+  <<: *uat_ci_manual_job  
+
+docker-compose-down_uat:
+  stage: validate
+  script:
+    - echo Stops container and removes container on `date` for $TAG
+    - echo "$SUDO" | sudo -S HOST=$HOST IMAGE=$IMAGE docker-compose -f docker-compose-traefik.yml down
+  <<: *uat_ci_manual_job 
+
+harbor_image:
+  stage: release
+  script:
+    - echo Build started on `date` for $TAG
+    - docker build --pull -t $HARBOR_PROJECT_URL$REPOSITORY:$TAG -f $DOCKERFILE .
+    - docker push $HARBOR_PROJECT_URL$REPOSITORY:$TAG
+  <<: *master_ci_manual_job 
+
+docker-hub_image:
+  stage: release
+  script:
+    - docker login -u $DOCKER_HUB_USER -p $DOCKER_HUB_PASSWORD
+    - echo Build started on `date` for $TAG
+    - docker build -t jodykpw/$REPOSITORY:$TAG -f $DOCKERFILE .
+    - docker push jodykpw/$REPOSITORY:$TAG
+  <<: *master_ci_manual_job 

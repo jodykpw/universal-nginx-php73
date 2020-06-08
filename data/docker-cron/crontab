@@ -1,0 +1,4 @@
+# https://crontab.guru/
+# https://crontab.guru/examples.html
+# min   hour    day     month   weekday command
+# *       *       *       *       *       /usr/bin/php /var/www/error_logging_test.php

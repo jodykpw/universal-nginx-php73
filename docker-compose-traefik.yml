@@ -1,0 +1,36 @@
+version: '3'
+
+services:
+  web:
+    image: jodykpw/universal-nginx-php73:1.0.0
+    container_name: universal-nginx-php
+    restart: always
+    ports:
+      - "8081:8080" # Nginx Exporter
+      - "9913:9913" # PHP-FPM Exporter
+    networks:
+      - traefik
+    environment:
+      MONITORING: 'false'
+      DOCKER_CRON: 'false'
+    volumes:
+      - nginx_config:/etc/nginx
+      - php_config:/etc/php/7.3
+      - www_data:/var/www
+    labels:
+      # Dynamic configuration with Docker Labels
+      # Ref: https://docs.traefik.io/reference/dynamic-configuration/docker/
+      - "traefik.enable=true"
+      - "traefik.http.routers.php.entrypoints=web"
+      - "traefik.http.routers.php.rule=Host(`${HOST}`)"
+      - "traefik.http.routers.php.service=php"
+      - "traefik.http.services.php.loadbalancer.server.port=80"
+
+volumes:
+  nginx_config: 
+  php_config: 
+  www_data: 
+
+networks:
+  traefik:
+    external: true
