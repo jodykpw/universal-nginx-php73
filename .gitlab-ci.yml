@@ -1,113 +1,101 @@
-image: docker:latest
-services:
-  - docker:dind
-  
+image: docker/compose:alpine-1.26.0
+
 variables:
   # DOCKERFILE
   DOCKERFILE: 'Dockerfile'
 
-  HARBOR_PROJECT_URL: 'harbor.zeedlogic.com/jodykpw/'
-  REPOSITORY: 'universal-nginx-php73'
-
+  REPO_NAME: 'jodykpw/universal-nginx-php73'
   TAG: "1.0.0"
-  DEV_TAG: $TAG.DEV$CI_JOB_ID
+  DEV_TAG: $TAG-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA
 
 # MASTER
 .master_ci_job: &master_ci_job
-   only:
-     - master
-   environment:
-     name: master 
-   tags:
-     - docker-01.zeedlogic.shared.docker
+  only:
+    - master
+  environment:
+    name: master 
+  tags:
+    - docker-01.example.shared.docker
 
 .master_ci_manual_job: &master_ci_manual_job
   when: manual
   <<: *master_ci_job
-  
-# PRODUCTION
-.prd_ci_job: &prd_ci_job
-   only:
-     - production
-   environment:
-     name: production 
-   tags:
-     - docker-01.zeedlogic.shared.ssh
-
-.prd_ci_manual_job: &prd_ci_manual_job
-  when: manual
-  <<: *prd_ci_job
-
-# UAT
-.uat_ci_job: &uat_ci_job
-   only:
-     - uat
-   environment:
-     name: uat 
-   tags:
-     - docker-01.zeedlogic.shared.ssh
-
-.uat_ci_manual_job: &uat_ci_manual_job
-  when: manual
-  <<: *uat_ci_job
 
 # DEVELOPMENT
 .dev_ci_job: &dev_ci_job
-   only:
-     - dev
-   environment:
-     name: dev 
-   tags:
-     - docker-01.zeedlogic.shared.docker
+  only:
+    - dev
+  environment:
+    name: dev 
+  tags:
+    - docker-01.example.shared.docker
 
 .dev_ci_manual_job: &dev_ci_manual_job
   when: manual
   <<: *dev_ci_job
 
 stages:
-  - build
-  - test
-  - validate
-  - release
+  - "Build"
+  - "Docker Composer Up"
+  - "Test Docker Container"
+  - "Docker Composer Down"
+  - "Release"
+  - "On Failure Cleanup"
 
 before_script:
-  - docker login -u $HARBOR_USER -p $HARBOR_PASSWORD harbor.zeedlogic.com
+  - docker version
+  - docker-compose version
+  - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN gitlab.example.com
 
-build_dev_image:
-  stage: build
+"Build":
+  stage: "Build"
   script:
     - echo Build started on `date` for $DEV_TAG
-    - docker build --pull -t $HARBOR_PROJECT_URL$REPOSITORY:$DEV_TAG -f $DOCKERFILE .
-    - docker push $HARBOR_PROJECT_URL$REPOSITORY:$DEV_TAG
-  <<: *dev_ci_manual_job  
+    - docker build -t $REPO_NAME:$DEV_TAG -f $DOCKERFILE .
+  <<: *dev_ci_job 
 
-docker-compose-up_uat:
-  stage: test
+"Docker Composer Up":
+  stage: "Docker Composer Up"
   script:
-    - echo UAT on `date` for $DEV_TAG
-    - echo "$SUDO" | sudo -S HOST=$HOST IMAGE=$IMAGE docker-compose -f docker-compose-traefik.yml up -d
-  <<: *uat_ci_manual_job  
+    - REPO_NAME=$REPO_NAME TAG=$DEV_TAG docker-compose -f docker-compose-build-test.yml up -d   
+  <<: *dev_ci_job 
 
-docker-compose-down_uat:
-  stage: validate
+"Test Docker Container":
+  stage: "Test Docker Container"
   script:
-    - echo Stops container and removes container on `date` for $TAG
-    - echo "$SUDO" | sudo -S HOST=$HOST IMAGE=$IMAGE docker-compose -f docker-compose-traefik.yml down
-  <<: *uat_ci_manual_job 
+    - sleep 20
+    - docker exec -i  universal-nginx-php-test nginx -c /etc/nginx/nginx.conf -t
+    - docker exec -i  universal-nginx-php-test php -m
+    - docker exec -i  universal-nginx-php-test composer -v
+    - docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost/healthz
+    - docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost:9001/status/format/json
+    - docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost:9000/status
+    - docker exec -i  universal-nginx-php-test ps aux    
+  <<: *dev_ci_job 
 
-harbor_image:
-  stage: release
+"Docker Composer Down":
+  stage: "Docker Composer Down"
   script:
-    - echo Build started on `date` for $TAG
-    - docker build --pull -t $HARBOR_PROJECT_URL$REPOSITORY:$TAG -f $DOCKERFILE .
-    - docker push $HARBOR_PROJECT_URL$REPOSITORY:$TAG
-  <<: *master_ci_manual_job 
+    - REPO_NAME=$REPO_NAME TAG=$DEV_TAG docker-compose -f docker-compose-build-test.yml down
+    - docker rmi $REPO_NAME:$DEV_TAG
+  <<: *dev_ci_job 
 
-docker-hub_image:
-  stage: release
+"Release to Docker Hub":
+  stage: "Release"
   script:
-    - docker login -u $DOCKER_HUB_USER -p $DOCKER_HUB_PASSWORD
-    - echo Build started on `date` for $TAG
-    - docker build -t jodykpw/$REPOSITORY:$TAG -f $DOCKERFILE .
-    - docker push jodykpw/$REPOSITORY:$TAG
-  <<: *master_ci_manual_job 
+    - docker login -u $DOCKER_HUB_USER -p $DOCKER_HUB_PASSWORD   
+    - docker build -t $REPO_NAME:$TAG -f $DOCKERFILE .
+    - docker push $REPO_NAME:$TAG
+  <<: *master_ci_job
+
+"Docker Composer Down":
+  stage: "On Failure Cleanup"
+  script:
+    - REPO_NAME=$REPO_NAME TAG=$DEV_TAG docker-compose -f docker-compose-build-test.yml down
+  when: on_failure
+
+"Docker Remove DEV Image":
+  stage: "On Failure Cleanup"
+  script:
+    - docker rmi $REPO_NAME:$DEV_TAG
+  when: on_failure
