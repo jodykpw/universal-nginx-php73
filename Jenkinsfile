@@ -9,9 +9,10 @@ pipeline {
         EMAIL_MIME_TYPE = 'text/html'
         EMAIL_ATTACH_LOG = 'true'
 
-        REGISTRY_URL = 'https://harbor.example.com'
-        CREDENTIALS_ID = 'harbor'
-        REPO = 'harbor.example.com/jodykpw/universal-nginx-php73'
+        // leave it blank if Docker Hub
+        REGISTRY_URL = ''
+        CREDENTIALS_ID = 'dockerhub'
+        REPO_NAME = 'jodykpw/universal-nginx-php73'
         TAG = '1.0.0'
         COMMIT_SHORT_SHA = """${sh(
                 returnStdout: true,
@@ -42,13 +43,11 @@ pipeline {
                 echo "========Executing stage: Build========"
 
                 script {
-                    docker.withRegistry("${env.REGISTRY_URL}", "${env.CREDENTIALS_ID}") {
-                        if ( env.BRANCH_NAME == "master" ) {
-                            app = docker.build("${env.REPO}:${TAG}")
-                                           
-                        } else {
-                            app = docker.build("${env.REPO}:${env.DEV_TAG}")
-                        }
+                    if ( env.BRANCH_NAME == "master" ) {
+                        app = docker.build("${env.REPO_NAME}:${TAG}")
+                                        
+                    } else {
+                        app = docker.build("${env.REPO_NAME}:${env.DEV_TAG}")
                     }
                 }
 
@@ -67,7 +66,7 @@ pipeline {
             steps {
                 echo "========Executing stage: Docker Composer Up========"
 
-                sh "REPO=${env.REPO} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml up -d"
+                sh "REPO_NAME=${env.REPO_NAME} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml up -d"
             }
             post{
                 success {
@@ -94,7 +93,12 @@ pipeline {
                         sh 'docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost:9000/status' 
                         sh 'docker exec -i  universal-nginx-php-test ps aux'                         
                     } catch (Exception e) {
-                        sh "REPO=${env.REPO} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml down"
+                        sh "REPO_NAME=${env.REPO_NAME} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml down"
+
+                        if ( env.BRANCH_NAME != "master" ) {
+                            sh "docker rmi ${env.REPO_NAME}:${env.DEV_TAG}"
+                        }
+
                         sh 'exit 1'
                     }
                 }
@@ -113,11 +117,11 @@ pipeline {
         stage("Docker Composer Down") {
             steps {
                 echo "========Executing stage: Docker Composer Down========"
-                sh "REPO=${env.REPO} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml down"
+                sh "REPO_NAME=${env.REPO_NAME} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml down"
 
                 script {
                     if ( env.BRANCH_NAME != "master" ) {
-                        sh "docker rmi ${env.REPO}:${env.DEV_TAG}"
+                        sh "docker rmi ${env.REPO_NAME}:${env.DEV_TAG}"
                     }
                 }
             }
@@ -131,7 +135,7 @@ pipeline {
             }
         }
 
-        stage("Release") {
+        stage("Release to Docker Hub") {
             when {
                 expression { env.BRANCH_NAME == "master" }
             }
@@ -139,7 +143,7 @@ pipeline {
                 echo "========Executing stage: Release========"
 
                 script {
-                    docker.withRegistry("${env.REGISTRY_URL}", "${env.CREDENTIALS_ID}") {
+                    docker.withRegistry("", "${env.CREDENTIALS_ID}") {
                         app.push()
                     }
                 }

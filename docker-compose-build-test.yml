@@ -2,7 +2,7 @@ version: '3'
 
 services:
   web:
-    image: ${REPO}:${TAG}
+    image: ${REPO_NAME}:${TAG}
     container_name: universal-nginx-php-test
     restart: always
     # ports:
