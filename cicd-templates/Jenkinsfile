@@ -9,9 +9,9 @@ pipeline {
         EMAIL_MIME_TYPE = 'text/html'
         EMAIL_ATTACH_LOG = 'true'
 
-        // leave it blank if Docker Hub
-        REGISTRY_URL = ''
-        CREDENTIALS_ID = 'dockerhub'
+        HARBOR_DOMAIN = 'harbor.example.com'
+        HARBOR_CREDENTIALS = 'harbor'
+        DOCKERHUB_CREDENTIALS = 'dockerhub'
         REPO_NAME = 'jodykpw/universal-nginx-php73'
         TAG = '1.0.0'
         COMMIT_SHORT_SHA = """${sh(
@@ -21,11 +21,13 @@ pipeline {
         DEV_TAG = "${env.TAG}-${env.BRANCH_NAME}-${env.COMMIT_SHORT_SHA}"
     }
 
+    parameters {
+        booleanParam(name: 'Vulnerability', defaultValue: false, description: '')
+    }
+
     stages {
         stage("SCM") {
             steps {
-                echo "========Executing stage: SCM========"
-                echo 'Pulling...' + env.BRANCH_NAME
                 checkout scm
             }
             post {
@@ -39,9 +41,7 @@ pipeline {
         }
 
         stage("Build") {
-            steps{
-                echo "========Executing stage: Build========"
-
+            steps {
                 script {
                     if ( env.BRANCH_NAME == "master" ) {
                         app = docker.build("${env.REPO_NAME}:${TAG}")
@@ -50,7 +50,6 @@ pipeline {
                         app = docker.build("${env.REPO_NAME}:${env.DEV_TAG}")
                     }
                 }
-
             }
             post {
                 success {
@@ -62,25 +61,9 @@ pipeline {
             }
         }
 
-        stage("Docker Composer Up") {
+        stage("Test") {
             steps {
-                echo "========Executing stage: Docker Composer Up========"
-
-                sh "REPO_NAME=${env.REPO_NAME} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml up -d"
-            }
-            post{
-                success {
-                    echo "========Docker Composer Up: executed successfully========"
-                }
-                failure {
-                    echo "========Docker Composer Up: execution failed========"
-                }
-            }
-        }
-
-        stage("Test Docker Container") {
-            steps {
-                echo "========Executing stage: Test Docker Container========"
+                sh script: "REPO_NAME=${env.REPO_NAME} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml up -d", label: "Docker Compose Up"
 
                 script {
                     try {
@@ -91,12 +74,19 @@ pipeline {
                         sh 'docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost/healthz' 
                         sh 'docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost:9001/status/format/json' 
                         sh 'docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost:9000/status' 
-                        sh 'docker exec -i  universal-nginx-php-test ps aux'                         
+                        sh 'docker exec -i  universal-nginx-php-test ps aux'  
+
+                        sh script: "REPO_NAME=${env.REPO_NAME} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml down", label: "Docker Compose Down"
+          
+                        if ( env.BRANCH_NAME != "master" ) {
+                            sh script: "docker rmi ${env.REPO_NAME}:${env.DEV_TAG}", label: "Untagged/Delete Development Docker Image."
+                        }
+                                              
                     } catch (Exception e) {
-                        sh "REPO_NAME=${env.REPO_NAME} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml down"
+                        sh "REPO_NAME=${env.REPO_NAME} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml down", label: "Docker Compose Down"
 
                         if ( env.BRANCH_NAME != "master" ) {
-                            sh "docker rmi ${env.REPO_NAME}:${env.DEV_TAG}"
+                            sh script: "docker rmi ${env.REPO_NAME}:${env.DEV_TAG}", label: "Untagged/Delete Development Docker Image."
                         }
 
                         sh 'exit 1'
@@ -104,50 +94,48 @@ pipeline {
                 }
 
             }
-            post {
+            post{
                 success {
-                    echo "========Test Docker Container: executed successfully========"
+                    echo "========Test: executed successfully========"
                 }
                 failure {
-                    echo "========Test Docker Container: execution failed========"
+                    echo "========Test: execution failed========"
                 }
             }
         }
 
-        stage("Docker Composer Down") {
+        stage("Vulnerability") {
+            when {
+                expression { params.Vulnerability == true }
+            }
             steps {
-                echo "========Executing stage: Docker Composer Down========"
-                sh "REPO_NAME=${env.REPO_NAME} TAG=${env.DEV_TAG} docker-compose -f docker-compose-build-test.yml down"
-
                 script {
-                    if ( env.BRANCH_NAME != "master" ) {
-                        sh "docker rmi ${env.REPO_NAME}:${env.DEV_TAG}"
+                    docker.withRegistry("https://${env.HARBOR_DOMAIN}", "${env.HARBOR_CREDENTIALS}") {
+                        app = docker.build("${env.HARBOR_DOMAIN}/${env.REPO_NAME}:${env.DEV_TAG}")
+                        app.push()
                     }
                 }
             }
             post {
-                success{
-                    echo "========Docker Composer Down: executed successfully========"
+                success {
+                    echo "========Release: executed successfully========"
                 }
-                failure{
-                    echo "========Docker Composer Down: execution failed========"
+                failure {
+                    echo "========Release: execution failed========"
                 }
             }
         }
 
-        stage("Release to Docker Hub") {
+        stage("Release") {
             when {
                 expression { env.BRANCH_NAME == "master" }
             }
             steps {
-                echo "========Executing stage: Release========"
-
                 script {
-                    docker.withRegistry("", "${env.CREDENTIALS_ID}") {
+                    docker.withRegistry("", "${env.DOCKERHUB_CREDENTIALS}") {
                         app.push()
                     }
                 }
-
             }
             post {
                 success {

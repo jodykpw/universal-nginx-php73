@@ -4,6 +4,7 @@ variables:
   # DOCKERFILE
   DOCKERFILE: 'Dockerfile'
 
+  HARBOR_DOMAIN: 'harbor.example.com'
   REPO_NAME: 'jodykpw/universal-nginx-php73'
   TAG: "1.0.0"
   DEV_TAG: $TAG-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA
@@ -36,16 +37,15 @@ variables:
 
 stages:
   - "Build"
-  - "Docker Composer Up"
-  - "Test Docker Container"
-  - "Docker Composer Down"
+  - "Test"
+  - "Vulnerability"
   - "Release"
   - "On Failure Cleanup"
 
 before_script:
   - docker version
   - docker-compose version
-  - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN gitlab.example.com
+  - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN gitlab.zeedlogic.com
 
 "Build":
   stage: "Build"
@@ -54,14 +54,14 @@ before_script:
     - docker build -t $REPO_NAME:$DEV_TAG -f $DOCKERFILE .
   <<: *dev_ci_job 
 
-"Docker Composer Up":
-  stage: "Docker Composer Up"
+"1. Docker Composer Up":
+  stage: "Test"
   script:
     - REPO_NAME=$REPO_NAME TAG=$DEV_TAG docker-compose -f docker-compose-build-test.yml up -d   
   <<: *dev_ci_job 
 
-"Test Docker Container":
-  stage: "Test Docker Container"
+"2. Test Docker Container":
+  stage: "Test"
   script:
     - sleep 20
     - docker exec -i  universal-nginx-php-test nginx -c /etc/nginx/nginx.conf -t
@@ -73,12 +73,21 @@ before_script:
     - docker exec -i  universal-nginx-php-test ps aux    
   <<: *dev_ci_job 
 
-"Docker Composer Down":
-  stage: "Docker Composer Down"
+"3. Docker Composer Down":
+  stage: "Test"
   script:
     - REPO_NAME=$REPO_NAME TAG=$DEV_TAG docker-compose -f docker-compose-build-test.yml down
     - docker rmi $REPO_NAME:$DEV_TAG
   <<: *dev_ci_job 
+
+"Harbor: Vulnerability Scanning (Manual Job)":
+  stage: "Vulnerability"
+  script: 
+    - docker login -u $HARBOR_USER -p $HARBOR_PASSWORD harbor.zeedlogic.com 
+    - docker build -t $HARBOR_DOMAIN/$REPO_NAME:$DEV_TAG -f $DOCKERFILE .
+    - docker push $HARBOR_DOMAIN/$REPO_NAME:$DEV_TAG
+    - docker rmi $HARBOR_DOMAIN/$REPO_NAME:$DEV_TAG
+  <<: *dev_ci_manual_job
 
 "Release to Docker Hub":
   stage: "Release"
@@ -93,9 +102,11 @@ before_script:
   script:
     - REPO_NAME=$REPO_NAME TAG=$DEV_TAG docker-compose -f docker-compose-build-test.yml down
   when: on_failure
+  <<: *dev_ci_job 
 
 "Docker Remove DEV Image":
   stage: "On Failure Cleanup"
   script:
     - docker rmi $REPO_NAME:$DEV_TAG
   when: on_failure
+  <<: *dev_ci_job 
