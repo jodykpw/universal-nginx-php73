@@ -94,6 +94,16 @@ before_script:
   script:
     - docker login -u $DOCKER_HUB_USER -p $DOCKER_HUB_PASSWORD   
     - docker build -t $REPO_NAME:$TAG -f $DOCKERFILE .
+    - REPO_NAME=$REPO_NAME TAG=$TAG docker-compose -f docker-compose-build-test.yml up -d  
+    - sleep 20
+    - docker exec -i  universal-nginx-php-test nginx -c /etc/nginx/nginx.conf -t
+    - docker exec -i  universal-nginx-php-test php -m
+    - docker exec -i  universal-nginx-php-test composer -v
+    - docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost/healthz
+    - docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost:9001/status/format/json
+    - docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost:9000/status
+    - docker exec -i  universal-nginx-php-test ps aux 
+    - REPO_NAME=$REPO_NAME TAG=$TAG docker-compose -f docker-compose-build-test.yml down    
     - docker push $REPO_NAME:$TAG
   <<: *master_ci_job
 

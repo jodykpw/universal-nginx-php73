@@ -131,11 +131,36 @@ pipeline {
                 expression { env.BRANCH_NAME == "master" }
             }
             steps {
+                sh script: "REPO_NAME=${env.REPO_NAME} TAG=${env.TAG} docker-compose -f docker-compose-build-test.yml up -d", label: "Docker Compose Up"
+
                 script {
-                    docker.withRegistry("", "${env.DOCKERHUB_CREDENTIALS}") {
-                        app.push()
+                    try {
+                        sh 'sleep 20'
+                        sh 'docker exec -i  universal-nginx-php-test nginx -c /etc/nginx/nginx.conf -t'
+                        sh 'docker exec -i  universal-nginx-php-test php -m'
+                        sh 'docker exec -i  universal-nginx-php-test composer -v'
+                        sh 'docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost/healthz' 
+                        sh 'docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost:9001/status/format/json' 
+                        sh 'docker exec -i  universal-nginx-php-test curl --silent --show-error --fail http://localhost:9000/status' 
+                        sh 'docker exec -i  universal-nginx-php-test ps aux'  
+
+                        sh script: "REPO_NAME=${env.REPO_NAME} TAG=${env.TAG} docker-compose -f docker-compose-build-test.yml down", label: "Docker Compose Down"
+          
+                        docker.withRegistry("", "${env.DOCKERHUB_CREDENTIALS}") {
+                            app.push()
+                        }
+                                              
+                    } catch (Exception e) {
+                        sh "REPO_NAME=${env.REPO_NAME} TAG=${env.TAG} docker-compose -f docker-compose-build-test.yml down", label: "Docker Compose Down"
+
+                        if ( env.BRANCH_NAME != "master" ) {
+                            sh script: "docker rmi ${env.REPO_NAME}:${env.TAG}", label: "Untagged/Delete Development Docker Image."
+                        }
+
+                        sh 'exit 1'
                     }
                 }
+
             }
             post {
                 success {
