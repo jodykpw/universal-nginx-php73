@@ -14,7 +14,7 @@ pipeline {
         HARBOR_CREDENTIALS = 'harbor'
         DOCKERHUB_CREDENTIALS = 'dockerhub'
         REPO_NAME = 'jodykpw/universal-nginx-php73'
-        VERSION = '1.0.0'
+        VERSION = '1.0.1'
         COMMIT_SHORT_SHA = """${sh(
                 returnStdout: true,
                 script: 'git rev-parse --short=8 HEAD'
